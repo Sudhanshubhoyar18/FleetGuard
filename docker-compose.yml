@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fleetguard-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: fleetguard
+      POSTGRES_PASSWORD: fleetguard_password_2026
+      POSTGRES_DB: fleetguard
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fleetguard-backend
+    restart: always
+    depends_on:
+      - postgres
+    environment:
+      PORT: 5000
+      DATABASE_URL: postgresql://fleetguard:fleetguard_password_2026@postgres:5432/fleetguard?schema=public
+      JWT_SECRET: fleetguard_prod_secret_key_892347891273918237912
+      DEVICE_AUTH_SECRET: fleetguard_device_shared_secret_token_2026
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    ports:
+      - "5000:5000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: fleetguard-frontend
+    restart: always
+    ports:
+      - "3000:80"
+
+volumes:
+  postgres_data:

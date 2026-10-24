@@ -1,0 +1,322 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("OPERATOR") // ADMIN, OPERATOR, VIEWER
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  auditLogs AuditLog[]
+}
+
+model Vehicle {
+  id               String   @id @default(uuid())
+  plateNumber      String   @unique
+  vin              String?  @unique
+  make             String
+  model            String
+  year             Int
+  status           String   @default("ACTIVE") // ACTIVE, IN_RENTAL, MAINTENANCE, DECOMMISSIONED
+  speedLimit       Float    @default(80.0)
+  immobilizerState String   @default("NORMAL") // NORMAL, IMMOBILIZED, PENDING_IMMOBILIZATION
+  currentTripId    String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  devices      Device[]
+  telemetry    Telemetry[]
+  trips        Trip[]
+  rentalOrders RentalOrder[]
+  speedAlerts  SpeedAlert[]
+  geofences    Geofence[]
+  commands     ImmobilizerCommand[]
+}
+
+model Device {
+  id                 String    @id @default(uuid())
+  deviceId           String    @unique // e.g. "FG-ESP32-001"
+  authSecretHash     String
+  model              String    @default("ESP32-SIM800L")
+  firmwareVersion    String    @default("1.0.0")
+  vehicleId          String?
+  isOnline           Boolean   @default(false)
+  lastHeartbeatAt    DateTime?
+  lastGpsFixAt       DateTime?
+  cellularSignalRssi Int?
+  networkOperator    String?
+  ipAddress          String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  vehicle            Vehicle?             @relation(fields: [vehicleId], references: [id])
+  heartbeats         DeviceHeartbeat[]
+  telemetry          Telemetry[]
+  trips              Trip[]
+  commands           ImmobilizerCommand[]
+  acknowledgments    ImmobilizerAck[]
+}
+
+model DeviceHeartbeat {
+  id              String   @id @default(uuid())
+  deviceId        String
+  timestamp       DateTime @default(now())
+  batteryVoltage  Float?
+  gsmSignal       Int?
+  networkStatus   String?
+  isGpsLocked     Boolean  @default(false)
+  memoryFreeBytes Int?
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, timestamp])
+}
+
+model Telemetry {
+  id              String   @id @default(uuid())
+  deviceId        String
+  vehicleId       String?
+  timestamp       DateTime
+  latitude        Float
+  longitude       Float
+  altitude        Float?
+  speedKmH        Float
+  headingDegrees  Float?
+  hdop            Float?
+  satelliteCount  Int?
+  isGpsValid      Boolean  @default(true)
+  isSimulated     Boolean  @default(false)
+  rawPacket       String?
+  createdAt       DateTime @default(now())
+
+  device  Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  vehicle Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+
+  @@index([deviceId, timestamp])
+  @@index([vehicleId, timestamp])
+}
+
+model Trip {
+  id                     String    @id @default(uuid())
+  vehicleId              String
+  deviceId               String?
+  rentalOrderId          String?
+  startTime              DateTime  @default(now())
+  endTime                DateTime?
+  status                 String    @default("ACTIVE") // ACTIVE, COMPLETED
+  startLatitude          Float?
+  startLongitude         Float?
+  endLatitude            Float?
+  endLongitude           Float?
+  totalDistanceKm        Float     @default(0.0)
+  maxSpeedKmH            Float     @default(0.0)
+  averageSpeedKmH        Float     @default(0.0)
+  pointCount             Int       @default(0)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  vehicle     Vehicle      @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  device      Device?      @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  rentalOrder RentalOrder? @relation(fields: [rentalOrderId], references: [id], onDelete: SetNull)
+  points      TripPoint[]
+
+  @@index([vehicleId, startTime])
+  @@index([rentalOrderId])
+}
+
+model TripPoint {
+  id             String   @id @default(uuid())
+  tripId         String
+  timestamp      DateTime
+  latitude       Float
+  longitude      Float
+  speedKmH       Float
+  headingDegrees Float?
+  distanceDeltaKm Float    @default(0.0)
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, timestamp])
+}
+
+model RentalOrder {
+  id                       String    @id @default(uuid())
+  orderNumber              String    @unique // e.g. "RNT-2026-001"
+  vehicleId                String
+  customerName             String
+  customerEmail            String?
+  customerPhone            String
+  customerIdNumber         String?
+  startDateTime            DateTime
+  expectedReturnDateTime   DateTime
+  actualReturnDateTime     DateTime?
+  startLocation            String
+  destinationAddress       String
+  destinationLatitude      Float?
+  destinationLongitude     Float?
+  allowedDistanceKm        Float
+  geofenceRadiusKm         Float?    @default(15.0)
+  speedLimitKmH            Float     @default(80.0)
+  status                   String    @default("ACTIVE") // DRAFT, SCHEDULED, ACTIVE, COMPLETED, CANCELLED, OVERDUE
+  totalDistanceTravelledKm Float     @default(0.0)
+  notes                    String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  vehicle     Vehicle       @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  trips       Trip[]
+  events      RentalEvent[]
+  speedAlerts SpeedAlert[]
+  geofences   Geofence[]
+
+  @@index([vehicleId, status])
+}
+
+model RentalEvent {
+  id            String   @id @default(uuid())
+  rentalOrderId String
+  eventType     String // CREATED, STARTED, RETURN_WARNING, OVERDUE, DISTANCE_EXCEEDED, GEOFENCE_DEVIATION, COMPLETED, CANCELLED
+  message       String
+  timestamp     DateTime @default(now())
+  metadataJson  String?
+
+  rentalOrder RentalOrder @relation(fields: [rentalOrderId], references: [id], onDelete: Cascade)
+
+  @@index([rentalOrderId, timestamp])
+}
+
+model SpeedAlert {
+  id                String    @id @default(uuid())
+  vehicleId         String
+  rentalOrderId     String?
+  speedRecordedKmH  Float
+  speedLimitKmH     Float
+  latitude          Float
+  longitude         Float
+  timestamp         DateTime  @default(now())
+  durationSeconds   Int       @default(0)
+  isAcknowledged    Boolean   @default(false)
+  acknowledgedBy    String?
+  acknowledgedAt    DateTime?
+
+  vehicle     Vehicle      @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  rentalOrder RentalOrder? @relation(fields: [rentalOrderId], references: [id], onDelete: SetNull)
+
+  @@index([vehicleId, timestamp])
+}
+
+model Geofence {
+  id              String   @id @default(uuid())
+  vehicleId       String?
+  rentalOrderId   String?
+  name            String
+  centerLatitude  Float
+  centerLongitude Float
+  radiusMeters    Float
+  isTriggerOnExit Boolean  @default(true)
+  isTriggerOnEnter Boolean @default(false)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  vehicle     Vehicle?     @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  rentalOrder RentalOrder? @relation(fields: [rentalOrderId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  title     String
+  message   String
+  category  String // DEVICE_STATUS, SPEED_ALERT, RENTAL_LIMIT, GEOFENCE, IMMOBILIZER, SYSTEM_ERROR
+  severity  String   @default("INFO") // INFO, WARNING, CRITICAL
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  deliveryLogs NotificationDeliveryLog[]
+
+  @@index([category, createdAt])
+}
+
+model NotificationDeliveryLog {
+  id              String   @id @default(uuid())
+  notificationId  String
+  channel         String // TELEGRAM, WEBSOCKET, EMAIL
+  recipient       String?
+  status          String // PENDING, DELIVERED, FAILED
+  responseDetails String?
+  attempts        Int      @default(1)
+  timestamp       DateTime @default(now())
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@index([notificationId])
+}
+
+model ImmobilizerCommand {
+  id                String    @id @default(uuid())
+  vehicleId         String
+  deviceId          String?
+  commandType       String // IMMOBILIZE, RESTORE
+  status            String    @default("REQUESTED") // REQUESTED, DELIVERED, ACKNOWLEDGED, COMPLETED, FAILED, EXPIRED
+  reason            String
+  requestedByUserId String?
+  requestedAt       DateTime  @default(now())
+  deliveredAt       DateTime?
+  acknowledgedAt    DateTime?
+  completedAt       DateTime?
+  expiresAt         DateTime
+  failureReason     String?
+  isSimulated       Boolean   @default(false)
+
+  vehicle         Vehicle          @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  device          Device?          @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  acknowledgments ImmobilizerAck[]
+
+  @@index([vehicleId, status])
+}
+
+model ImmobilizerAck {
+  id                   String   @id @default(uuid())
+  commandId            String
+  deviceId             String
+  timestamp            DateTime @default(now())
+  relayState           String // ACTIVE, INACTIVE
+  vehicleSpeedAtAckKmH Float?
+  rawPayload           String?
+
+  command ImmobilizerCommand @relation(fields: [commandId], references: [id], onDelete: Cascade)
+  device  Device             @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([commandId])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  userId       String?
+  action       String
+  resourceType String
+  resourceId   String?
+  detailsJson  String?
+  ipAddress    String?
+  timestamp    DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([action, timestamp])
+}
+
+model AppSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}

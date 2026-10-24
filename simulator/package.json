@@ -1,0 +1,13 @@
+{
+  "name": "fleetguard-simulator",
+  "version": "1.0.0",
+  "description": "IoT Hardware, Telemetry & Safe Immobilizer Simulator for FleetGuard",
+  "main": "iot-device-simulator.ts",
+  "scripts": {
+    "start": "tsx iot-device-simulator.ts",
+    "speed-test": "tsx iot-device-simulator.ts --overspeed"
+  },
+  "dependencies": {
+    "tsx": "^4.19.2"
+  }
+}
